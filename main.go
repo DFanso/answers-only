@@ -182,13 +182,13 @@ func processQuestion(ctx context.Context, question string, config Config) (strin
 	groqContent := "Error getting response"
 
 	if geminiResp != nil {
-		geminiContent = geminiResp.Content
+		geminiContent = formatResponse(geminiResp.Content)
 	}
 	if groqResp != nil {
-		groqContent = groqResp.Content
+		groqContent = formatResponse(groqResp.Content)
 	}
 
-	return fmt.Sprintf("Responses differ after %d attempts:\n\nGemini: %s\n\nGroq: %s",
+	return fmt.Sprintf("Responses after %d attempts:\n\nGemini Response:\n%s\n\nGroq Response:\n%s",
 		config.MaxRetries, geminiContent, groqContent), nil
 }
 
@@ -199,8 +199,18 @@ func getGeminiResponse(ctx context.Context, question, apiKey string) (*Response,
 	}
 	defer client.Close()
 
+	// Enhance the prompt for multiple choice questions
+	enhancedPrompt := fmt.Sprintf(`If this is a multiple choice question, please:
+1. Analyze each option carefully
+2. Provide a clear "Yes" or "No" for each option
+3. Explain the reasoning for each option
+4. At the end, summarize which options are correct
+
+Here's the question:
+%s`, question)
+
 	model := client.GenerativeModel("gemini-pro")
-	resp, err := model.GenerateContent(ctx, genai.Text(question))
+	resp, err := model.GenerateContent(ctx, genai.Text(enhancedPrompt))
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate Gemini response: %v", err)
 	}
@@ -214,12 +224,22 @@ func getGeminiResponse(ctx context.Context, question, apiKey string) (*Response,
 func getGroqResponse(question, apiKey string) (*Response, error) {
 	url := "https://api.groq.com/openai/v1/chat/completions"
 
+	// Enhance the prompt for multiple choice questions
+	enhancedPrompt := fmt.Sprintf(`If this is a multiple choice question, please:
+1. Analyze each option carefully
+2. Provide a clear "Yes" or "No" for each option
+3. Explain the reasoning for each option
+4. At the end, summarize which options are correct
+
+Here's the question:
+%s`, question)
+
 	reqBody := GroqRequest{
 		Model: "llama-3.3-70b-versatile",
 		Messages: []Message{
 			{
 				Role:    "user",
-				Content: question,
+				Content: enhancedPrompt,
 			},
 		},
 	}
@@ -287,4 +307,11 @@ func compareResponses(ctx context.Context, resp1, resp2, geminiKey string) (bool
 
 	result := strings.ToLower(strings.TrimSpace(string(resp.Candidates[0].Content.Parts[0].(genai.Text))))
 	return result == "true", nil
+}
+
+func formatResponse(response string) string {
+	// Add some visual separation between sections
+	response = strings.ReplaceAll(response, "Option", "\nOption")
+	response = strings.ReplaceAll(response, "Summary", "\n\nSummary")
+	return response
 }
